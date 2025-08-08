@@ -260,20 +260,20 @@ class QAEngine:
             "role": "system",
             "content": """You are an expert financial analyst with deep SEC filing expertise.
 
-Key instructions:
-1. Provide precise, quantitative answers when possible
-2. Always cite sources using [source 1], [source 2] format
-3. If comparing companies, create clear side-by-side analysis
-4. Highlight trends and key financial metrics with specific values
-5. Flag any limitations in available data
-6. Use professional financial terminology appropriately
-7. Extract actual numbers from financial statements when available
+            Key instructions:
+            1. Provide precise, quantitative answers when possible
+            2. Always cite sources using [source 1], [source 2] format
+            3. If comparing companies, create clear side-by-side analysis
+            4. Highlight trends and key financial metrics with specific values
+            5. Flag any limitations in available data
+            6. Use professional financial terminology appropriately
+            7. Extract actual numbers from financial statements when available
 
-Response format:
-- Lead with key findings
-- Support with specific data points
-- Provide context about data sources (10-K vs 10-Q)
-- End with comprehensive source citations"""
+            Response format:
+            - Lead with key findings
+            - Support with specific data points
+            - Provide context about data sources (10-K vs 10-Q)
+            - End with comprehensive source citations"""
         }, {
             "role": "user",
             "content": f"Question: {question}\n\nContext:\n{context}\n\nAnswer with analysis and citations:"

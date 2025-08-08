@@ -35,8 +35,8 @@ async def demo_system():
     
     # Ingest sample companies
     print("\n📊 Ingesting sample companies...")
-    companies = ["AAPL"]
-    results = await system.ingest_companies(companies, limit_per_company=2)
+    companies = ["AAPL", "MSFT", "TSLA", "JPM"]
+    results = await system.ingest_companies(companies, limit_per_company=3)
     
     for ticker, result in results.items():
         if result['errors']:
@@ -49,10 +49,9 @@ async def demo_system():
     # Demo questions
     print("\n❓ Demo questions:")
     test_cases = [
-        "What are Apple's main risk factors?",
         "What was Apple's revenue in the latest quarter?", 
         "How much does Apple spend on R&D?",
-        "What are Apple's main business segments?"
+        "Compare R&D spending trends across companies. What insights about innovation investment strategies?",
     ]
     
     for question in test_cases:

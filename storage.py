@@ -205,63 +205,97 @@ class ProductionDB:
         except Exception as e:
             logger.error(f"Failed to store chunks: {e}")
             raise
-    
+
     async def search_with_routing(self, routing_result: RoutingResult, limit: int = 20) -> List[FormChunk]:
         """Search chunks using routing results with flexible matching"""
         conditions = ["1=1"]
         params = []
-        
+
         # Ticker filtering
         if routing_result.recommended_tickers:
             conditions.append(f"ticker = ANY(${len(params) + 1})")
             params.append(routing_result.recommended_tickers)
-        
+
         # Form type filtering
         if routing_result.recommended_forms:
             form_values = [f.value for f in routing_result.recommended_forms]
             conditions.append(f"form_type = ANY(${len(params) + 1})")
             params.append(form_values)
-        
-        # Section targeting - make this more flexible
+
+        # Enhanced section targeting using concept mappings from routing
         if routing_result.primary_targets:
+            from routing import ConceptRepository
+            concept_repo = ConceptRepository()
+            
             section_conditions = []
+            content_fallbacks = set()  # Use set to avoid duplicates
+            
             for target in routing_result.primary_targets:
-                # Use flexible matching instead of exact
+                # Direct section matching
                 section_conditions.append(
                     f"(form_type = '{target.form_type.value}' AND section_type = '{target.section_type}' AND section_number LIKE '%{target.section_number}%')"
                 )
                 
-                # Add content-based fallback
-                if target.section_number == "1A":
-                    section_conditions.append("(section_title ILIKE '%risk%' OR content_type = 'risk_factors')")
-                elif target.section_number == "7":
-                    section_conditions.append("(section_title ILIKE '%management%discussion%' OR content_type = 'mda')")
-                elif target.section_number == "8":
-                    section_conditions.append("(section_title ILIKE '%financial%statement%' OR content_type = 'financials')")
+                # Find which concept this target belongs to and use its aliases
+                for concept_name, mapping in concept_repo.get_all_concepts().items():
+                    if target in mapping.sections:
+                        # Add content type matching
+                        if concept_name == "risk_factors":
+                            content_fallbacks.add("(section_title ILIKE '%risk%' OR content_type = 'risk_factors')")
+                        elif concept_name == "financial_statements":
+                            content_fallbacks.add("(section_title ILIKE '%financial%statement%' OR section_title ILIKE '%consolidated%statement%' OR section_title ILIKE '%income%statement%' OR section_title ILIKE '%balance%sheet%' OR section_title ILIKE '%cash%flow%' OR content_type = 'financials')")
+                        elif concept_name == "mda":
+                            content_fallbacks.add("(section_title ILIKE '%management%discussion%' OR section_title ILIKE '%md&a%' OR content_type = 'mda')")
+                        elif concept_name == "business_overview":
+                            content_fallbacks.add("(section_title ILIKE '%business%' OR section_title ILIKE '%overview%' OR section_title ILIKE '%operations%' OR content_type = 'business_overview')")
+                        elif concept_name == "research_development":
+                            content_fallbacks.add("(section_title ILIKE '%research%' OR section_title ILIKE '%development%' OR section_title ILIKE '%r&d%' OR content_type = 'research_development')")
+                        elif concept_name == "insider_transactions":
+                            content_fallbacks.add("(section_title ILIKE '%insider%' OR section_title ILIKE '%beneficial%ownership%' OR content_type = 'insider_transactions')")
+                        elif concept_name == "material_agreements":
+                            content_fallbacks.add("(section_title ILIKE '%agreement%' OR section_title ILIKE '%contract%' OR section_title ILIKE '%merger%' OR content_type = 'material_agreement')")
+                        elif concept_name == "corporate_governance":
+                            content_fallbacks.add("(section_title ILIKE '%governance%' OR section_title ILIKE '%board%' OR section_title ILIKE '%committee%' OR content_type = 'corporate_governance')")
+                        elif concept_name == "dividends":
+                            content_fallbacks.add("(section_title ILIKE '%dividend%' OR section_title ILIKE '%distribution%' OR content_type = 'dividends')")
+                        
+                        # Also add alias-based matching
+                        alias_conditions = []
+                        for alias in mapping.aliases:
+                            alias_clean = alias.replace("_", " ").replace("&", "")
+                            alias_conditions.append(f"section_title ILIKE '%{alias_clean}%'")
+                        
+                        if alias_conditions:
+                            content_fallbacks.add(f"({' OR '.join(alias_conditions)})")
             
-            if section_conditions:
-                conditions.append(f"({' OR '.join(section_conditions)})")
+            # Combine all conditions
+            all_conditions = section_conditions + list(content_fallbacks)
+            
+            if all_conditions:
+                conditions.append(f"({' OR '.join(all_conditions)})")
+            else:
+                # Broad fallback if nothing matches
+                conditions.append("(content_type IS NOT NULL OR char_count > 500)")
         
         # Basic content filtering
         conditions.append("char_count > 100")
-        
+
         query = f"""
-            SELECT chunk_id, form_type, section_type, section_number, section_title,
-                   content, start_pos, end_pos, cik, ticker, filing_date, fiscal_year,
-                   fiscal_quarter, content_type, char_count, filing_url, document_url,
-                   parent_form_type, parent_filing_date, attachment_number,
-                   attachment_description, is_attachment, attachment_type, embedding
-            FROM chunks
-            WHERE {' AND '.join(conditions)}
-            ORDER BY fiscal_year DESC NULLS LAST, char_count DESC
-            LIMIT {limit}
+        SELECT chunk_id, form_type, section_type, section_number, section_title,
+               content, start_pos, end_pos, cik, ticker, filing_date, fiscal_year,
+               fiscal_quarter, content_type, char_count, filing_url, document_url,
+               parent_form_type, parent_filing_date, attachment_number,
+               attachment_description, is_attachment, attachment_type, embedding
+        FROM chunks
+        WHERE {' AND '.join(conditions)}
+        ORDER BY fiscal_year DESC NULLS LAST, char_count DESC
+        LIMIT {limit}
         """
-        
+
         chunks = []
         try:
             async with self.get_connection() as conn:
                 rows = await conn.fetch(query, *params)
-                
                 for row in rows:
                     chunk = FormChunk(
                         form_type=row['form_type'],
@@ -290,12 +324,103 @@ class ProductionDB:
                         embedding=row['embedding']
                     )
                     chunks.append(chunk)
-                    
         except Exception as e:
             logger.error(f"Search failed: {e}")
             return []
-        
+
         return chunks
+
+    
+    # async def search_with_routing(self, routing_result: RoutingResult, limit: int = 20) -> List[FormChunk]:
+    #     """Search chunks using routing results with flexible matching"""
+    #     conditions = ["1=1"]
+    #     params = []
+        
+    #     # Ticker filtering
+    #     if routing_result.recommended_tickers:
+    #         conditions.append(f"ticker = ANY(${len(params) + 1})")
+    #         params.append(routing_result.recommended_tickers)
+        
+    #     # Form type filtering
+    #     if routing_result.recommended_forms:
+    #         form_values = [f.value for f in routing_result.recommended_forms]
+    #         conditions.append(f"form_type = ANY(${len(params) + 1})")
+    #         params.append(form_values)
+        
+    #     # Section targeting - make this more flexible
+    #     if routing_result.primary_targets:
+    #         section_conditions = []
+    #         for target in routing_result.primary_targets:
+    #             # Use flexible matching instead of exact
+    #             section_conditions.append(
+    #                 f"(form_type = '{target.form_type.value}' AND section_type = '{target.section_type}' AND section_number LIKE '%{target.section_number}%')"
+    #             )
+                
+    #             # Add content-based fallback
+    #             if target.section_number == "1A":
+    #                 section_conditions.append("(section_title ILIKE '%risk%' OR content_type = 'risk_factors')")
+    #             elif target.section_number == "7":
+    #                 section_conditions.append("(section_title ILIKE '%management%discussion%' OR content_type = 'mda')")
+    #             elif target.section_number == "8":
+    #                 section_conditions.append("(section_title ILIKE '%financial%statement%' OR content_type = 'financials')")
+            
+    #         if section_conditions:
+    #             conditions.append(f"({' OR '.join(section_conditions)})")
+        
+    #     # Basic content filtering
+    #     conditions.append("char_count > 100")
+        
+    #     query = f"""
+    #         SELECT chunk_id, form_type, section_type, section_number, section_title,
+    #                content, start_pos, end_pos, cik, ticker, filing_date, fiscal_year,
+    #                fiscal_quarter, content_type, char_count, filing_url, document_url,
+    #                parent_form_type, parent_filing_date, attachment_number,
+    #                attachment_description, is_attachment, attachment_type, embedding
+    #         FROM chunks
+    #         WHERE {' AND '.join(conditions)}
+    #         ORDER BY fiscal_year DESC NULLS LAST, char_count DESC
+    #         LIMIT {limit}
+    #     """
+        
+    #     chunks = []
+    #     try:
+    #         async with self.get_connection() as conn:
+    #             rows = await conn.fetch(query, *params)
+                
+    #             for row in rows:
+    #                 chunk = FormChunk(
+    #                     form_type=row['form_type'],
+    #                     section_type=row['section_type'],
+    #                     section_number=row['section_number'],
+    #                     section_title=row['section_title'],
+    #                     content=row['content'],
+    #                     start_pos=row['start_pos'],
+    #                     end_pos=row['end_pos'],
+    #                     cik=row['cik'],
+    #                     ticker=row['ticker'],
+    #                     filing_date=str(row['filing_date']) if row['filing_date'] else '',
+    #                     fiscal_year=row['fiscal_year'],
+    #                     fiscal_quarter=row['fiscal_quarter'],
+    #                     chunk_id=row['chunk_id'],
+    #                     content_type=row['content_type'],
+    #                     char_count=row['char_count'],
+    #                     filing_url=row['filing_url'],
+    #                     document_url=row['document_url'],
+    #                     parent_form_type=row['parent_form_type'],
+    #                     parent_filing_date=str(row['parent_filing_date']) if row['parent_filing_date'] else None,
+    #                     attachment_number=row['attachment_number'],
+    #                     attachment_description=row['attachment_description'],
+    #                     is_attachment=row['is_attachment'],
+    #                     attachment_type=row['attachment_type'],
+    #                     embedding=row['embedding']
+    #                 )
+    #                 chunks.append(chunk)
+                    
+    #     except Exception as e:
+    #         logger.error(f"Search failed: {e}")
+    #         return []
+        
+    #     return chunks
 
 class VectorStore:
     """Memory-efficient vector store with quantization"""

@@ -15,6 +15,9 @@ class FormType(Enum):
     FORM_10Q = "10-Q"  
     FORM_8K = "8-K"
     FORM_DEF14A = "DEF14A"
+    FORM_3 = "3"
+    FORM_4 = "4"
+    FORM_5 = "5"
 
 @dataclass(frozen=True)
 class SectionIdentifier:
@@ -429,11 +432,11 @@ class Router:
         scope = temporal_context.scope
         
         if scope in [TemporalScope.SPECIFIC_YEAR, TemporalScope.ANNUAL, TemporalScope.HISTORICAL]:
-            return [FormType.FORM_10K, FormType.FORM_10Q]
+            return [FormType.FORM_10K, FormType.FORM_10Q, FormType.FORM_5]
         elif scope == TemporalScope.QUARTERLY:
             return [FormType.FORM_10Q]
         elif scope == TemporalScope.RECENT:
-            return [FormType.FORM_8K, FormType.FORM_10Q]
+            return [FormType.FORM_8K, FormType.FORM_10Q, FormType.FORM_4, FormType.FORM_3]
         
         return [FormType.FORM_10K, FormType.FORM_10Q]
     
