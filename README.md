@@ -37,8 +37,8 @@ A question-answering system over SEC filings. It fetches company filings from ED
 
 1. **Clone this repository**
    ```bash
-   git clone https://github.com/yourusername/sec-filings-qa.git
-   cd sec-filings-qa
+   git clone https://github.com/AxelB1011/ScalarField_Screening.git
+   cd ScalarField_Screening
    ```
 
 2. **Create the Conda environment**
